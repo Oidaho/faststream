@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Callable, Generator, Iterable
 from functools import partial
 from typing import (
@@ -74,6 +75,12 @@ class PublisherUsecase(Endpoint, PublisherProto):
         self.specification.add_call(handler._original_call)
         return handler
 
+    def _should_skip_publish(self, cmd: "PublishCommand") -> bool:
+        """Check if the message with None body should be skipped."""
+        has_nonetype = cmd.body is None or None in cmd.batch_bodies
+
+        return has_nonetype and not self.specification.nonetype_allowed
+
     async def _basic_publish(
         self,
         cmd: "PublishCommand",
@@ -81,10 +88,19 @@ class PublisherUsecase(Endpoint, PublisherProto):
         producer: "ProducerProto[Any]",
         _extra_middlewares: Iterable["PublisherMiddleware"],
     ) -> Any:
-        pub = producer.publish
-        for pub_m in self._build_middlewares_stack(_extra_middlewares):
-            pub = partial(pub_m, pub)
-        return await pub(cmd)
+        # skip_none guard runs before the middlewares stack is built,
+        # so a skipped (None) message never reaches middlewares or producer.
+        if self._should_skip_publish(cmd):
+            msg = "Publish skipped. NoneType body."
+            self._outer_config.logger.log(msg, logging.DEBUG)
+            return None
+
+        publish_callable = producer.publish
+
+        for middleware in self._build_middlewares_stack(_extra_middlewares):
+            publish_callable = partial(middleware, publish_callable)
+
+        return await publish_callable(cmd)
 
     async def _basic_publish_batch(
         self,
@@ -93,10 +109,24 @@ class PublisherUsecase(Endpoint, PublisherProto):
         producer: "ProducerProto[Any]",
         _extra_middlewares: Iterable["PublisherMiddleware"],
     ) -> Any:
-        pub = producer.publish_batch
-        for pub_m in self._build_middlewares_stack(_extra_middlewares):
-            pub = partial(pub_m, pub)
-        return await pub(cmd)
+        # A partially-None batch is still published: only None values are
+        # excluded (`cmd.batch_bodies` guard skips useless filtering).
+        if cmd.batch_bodies and self._should_skip_publish(cmd):
+            cmd.batch_bodies = tuple(filter(lambda x: x is not None, cmd.batch_bodies))
+
+        # Re-check after exclusion: an empty batch resets `cmd.body` to None
+        # via the setter, so an all-None batch is skipped right here.
+        if self._should_skip_publish(cmd):
+            msg = "Publish skipped. Empty batch (NoneType body)."
+            self._outer_config.logger.log(msg, logging.DEBUG)
+            return None
+
+        publish_callable = producer.publish_batch
+
+        for middleware in self._build_middlewares_stack(_extra_middlewares):
+            publish_callable = partial(middleware, publish_callable)
+
+        return await publish_callable(cmd)
 
     async def _basic_request(
         self,
