@@ -42,6 +42,11 @@ class PublisherSpecification(Generic[T_BrokerConfig, T_SpecificationConfig]):
             self._outer_config.include_in_schema and self.config.include_in_schema,
         )
 
+    @property
+    def nonetype_allowed(self) -> bool:
+        """Indicates whether NoneType values are allowed to be sent."""
+        return not self.config.skip_none
+
     def get_payloads(self) -> list[tuple[dict[str, Any], str]]:
         payloads: list[tuple[dict[str, Any], str]] = []
 
