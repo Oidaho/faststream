@@ -47,6 +47,7 @@ class KafkaPublisher(ArgsContainer):
         headers: dict[str, str] | None = None,
         reply_to: str = "",
         batch: bool = False,
+        skip_none: bool = False,
         # AsyncAPI args
         title: str | None = None,
         description: str | None = None,
@@ -74,6 +75,11 @@ class KafkaPublisher(ArgsContainer):
                 Can be overridden by `publish.headers` if specified.
             reply_to: Topic name to send response.
             batch: Whether to send messages in batches or not.
+            skip_none:
+                Skip publishing when the message value is `None`.
+                For batch publishers, `None` values are excluded from the
+                batch, and publishing is skipped only if the batch becomes
+                empty (every value is `None`).
             title: AsyncAPI publisher object title.
             description: AsyncAPI publisher object description.
             schema:
@@ -86,6 +92,7 @@ class KafkaPublisher(ArgsContainer):
             key=key,
             partition=partition,
             batch=batch,
+            skip_none=skip_none,
             headers=headers,
             reply_to=reply_to,
             # AsyncAPI args
